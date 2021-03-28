@@ -313,4 +313,4 @@ def createBots(code, num):
         queue[code].append(Game.BOTS[i])
 
 
-bot.run('Njk5NTQ5MDQxODMwMTMzNzkx.XpV_0A.mJ3sDGVr5O2GVOJ2bC-Fg1RCYpE')
+bot.run('YOUR TOKEN')
