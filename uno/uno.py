@@ -130,9 +130,18 @@ async def useCard(ctx, index="auto", color=""):
     elif index == "auto":  # if no index has passed play automatically a valid move (card or draw)
         game = games[id][0]
         hand = game.getHand()
+
         for i in range(len(hand)):
             if game.canBeSet(hand[i]):
-                await apply(ctx, i, random.choice(Game.COLORS))  # pick a random color in case the card is a jolly
+                if hand[i].color == "Jolly":
+                    for c in hand:
+                        if c.color != "Jolly":
+                            color = c.color
+                            break
+                else:
+                    random.choice(Game.COLORS)
+                    
+                await apply(ctx, i, color)  # pick a random color in case the card is a jolly
                 return
 
         await drawCard(ctx)
