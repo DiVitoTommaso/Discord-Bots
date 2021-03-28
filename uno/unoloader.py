@@ -163,8 +163,14 @@ class Game:
     async def runBot(self):
         for card in self.getHand():  # play a card if it's a jolly choose a random color
             if card.color == "Jolly":
-                color = random.choice(Game.COLORS)
-                card = self.privateCardFromColor(card, color)
+                color = ""
+
+                for c in self.getHand():
+                    if c.color != "Jolly":
+                        color = c.color
+                        break
+
+                card = self.privateCardFromColor(card, color if color else random.choice(Game.COLORS))
 
             if self.canBeSet(card):  # if card can be played, play it and exit the loop
                 await self.set(card)
@@ -216,7 +222,8 @@ class Game:
     def dsEmojiLen(self, i) -> int:
         # return how many discord emojis needs to print the number of cards of the give player
         tmp = self.intToEmoji(len(self.getHand(i)))
-        return tmp.count(":") // 2
+        tmp = tmp.count(":") // 2
+        return tmp if tmp > 0 else 1
 
     def intToEmoji(self, i) -> str:
         # turn a number into a discord emoji
