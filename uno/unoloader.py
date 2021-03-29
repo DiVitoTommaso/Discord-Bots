@@ -20,7 +20,34 @@ antiClockNext = {
 
 # a timer class to avoid game starvation not implemented for the moment
 class Timer:
-    pass
+    def __init__(self, game):
+        self.time = 20
+        self.game = game
+
+    async def runTurnTimer(self):
+        while not self.game.end:  # is game is active
+
+            if self.time == 0:  # if time is 0 turn time ahs ended
+                self.time = 20  # reset the timer
+
+                # if player has already drown skip only else draw and skip
+                if self.game.skippable.get(self.game.playerId()) is not None:
+                    del self.game.skippable[self.game.playerId()]
+                    await self.game.draw(0, afk=True, skip=True)
+                else:
+                    await self.game.draw(1, afk=True, skip=True)
+
+            self.time -= 1  # decrease the timer async
+            await asyncio.sleep(1)
+
+    async def runGameTimer(self):
+        await asyncio.sleep(1800)  # max game time 30m
+        self.game.end = True
+        self.game.effect_msg = "Max game time exceeded. Stopping game... "
+        await self.game.redraw(self.game)
+
+    def resetTurnTimer(self):
+        self.time = 20
 
 
 # class used to represent a UNO Card
@@ -36,6 +63,8 @@ class Card:
 
 
 def sortCards(c):
+    if c.color == "Jolly":
+        return "z", 100
     return c.color, c.value
 
 
@@ -44,10 +73,11 @@ class Game:
     BOTS = (-1, -2, -3)
     COLORS = ("Yellow", "Red", "Blue", "Green")
 
-    def __init__(self, hands: dict, deck: list, privateCards, start: Card, botRedraw):
+    def __init__(self, hands: dict, deck: list, privateCards, start: Card, botRedraw, skippable: dict):
         deck.append(start)
 
         self.redraw = botRedraw
+        self.skippable = skippable
 
         self.privateCards = privateCards
         self.deck = deck
@@ -75,8 +105,12 @@ class Game:
 
         self.effect_msg = "Loading..."
 
+        self.timer = Timer(self)
+
     async def start(self):
         self.effect_msg = await self.apply(self.card)
+        await self.timer.runTurnTimer()
+        await self
 
     def playerId(self, i=-1) -> int:
         # return the player associated to that index. if not index is passed return the current player
@@ -98,6 +132,8 @@ class Game:
         # check if card is legal then set the card then fire the effect
         hand = self.hands[self.playerId()]
 
+        self.timer.resetTurnTimer()  # reset the timer after a card play
+
         if card.value == -1:  # check if it's a jolly
             for c in hand:
                 if c.effect == card.effect:
@@ -117,7 +153,6 @@ class Game:
                 self.end = True
 
             await self.apply(self.card)
-            self.effect_msg += " and won " + self.winnerEmoji()
         else:
             await self.apply(self.card)
 
@@ -157,10 +192,19 @@ class Game:
 
     async def botCheck(self):
         await self.redraw(self)
-        if self.isBotIndex():  # if it's a bot execute it
+        self.timer.resetTurnTimer()  # reset also after a redraw that is very slow
+
+        if self.isBotIndex():  # if it's a bot execute it else => it's a player and timer has been reset
             await self.runBot()
 
     async def runBot(self):
+        if not await self.playBotHand():  # try to play a card
+            await self.draw(1, skip=False)  # if the bot can't play any card draw a card
+            if not await self.playBotHand():  # try to play a card again
+                self.next()  # if no card is still playable skip turn and check if the next player is a bot
+                await self.botCheck()
+
+    async def playBotHand(self):
         for card in self.getHand():  # play a card if it's a jolly choose a random color
             if card.color == "Jolly":
                 color = ""
@@ -174,11 +218,11 @@ class Game:
 
             if self.canBeSet(card):  # if card can be played, play it and exit the loop
                 await self.set(card)
-                return
+                return True
 
-        await self.draw(1, check=True)  # if there the bot can't play any card draw a card
+        return False
 
-    async def draw(self, count: int, player: int = -1, check=False):
+    async def draw(self, count: int, player: int = -1, afk=False, skip=True):
         # add a number of cards to the player specified. If no player is passed cards will be added to next player
         for _ in range(count):
             if len(self.deck) > 0:
@@ -190,12 +234,16 @@ class Game:
 
         self.hands[self.players[self.currentPlayerIndex]].sort(key=sortCards)
 
-        self.next()
-        # after a draw go to the next player even if it's a draw card or if player has no playable card
-        # if a draw card has been played it's assumed the first next() call has been already made in another method
+        self.effect_msg = "Nothing and has drown 1 card"
+        if skip:
+            self.next()
+            # after a draw if skip is True go to the next player else wait if player wants to play the card
+            # if a draw card has been played it's assumed the first next() call has been already made in another method
 
-        if check:  # if the user ask to write that the player has drown some cards then write it
-            self.effect_msg = f"Nothing and has drown 1 card"
+            # if the user ask to write that the player has drown some cards then write it
+            if afk:
+                self.effect_msg = "Nothing, has drown 1 card and skipped the turn due to AFK"
+
             await self.botCheck()
 
     def next(self):
@@ -255,16 +303,6 @@ class Game:
 
     def isBotIndex(self, i=-1):
         return self.playerId(i) in Game.BOTS
-
-    def winnerEmoji(self):
-        # get winner emoji depending on how many winners there are already.
-        # If it's the the third winner to avoid useless controls in other function set self.end to true
-        if len(self.winners) == 0:
-            return ":first_place:"
-        if len(self.winners) == 1:
-            return ":second_place:"
-        if len(self.winners) == 2:
-            return ":third_place:"
 
 
 def load(bot):

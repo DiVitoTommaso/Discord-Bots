@@ -13,6 +13,7 @@ privateCards = ()
 
 games = {}
 players = {}
+canQuit = {}
 
 queue = {}
 
@@ -31,7 +32,7 @@ async def play(pls):
 
         hands[p] = hand
 
-    game = Game(hands, cardsCopy, privateCards, startCard, redraw)  # create game
+    game = Game(hands, cardsCopy, privateCards, startCard, redraw, skippable)  # create game
     table = drawTable(game, players)  # turn game into a message
 
     await firstDraw(game, pls, table)
@@ -44,14 +45,20 @@ async def firstDraw(game, pls, table):
         if p in Game.BOTS:  # if player is a bot skip
             continue
 
-        user = await bot.fetch_user(p)
-        games[p] = [game]
+        try:
+            user = await bot.fetch_user(p)
+            games[p] = [game]
 
-        for line in table:
-            games[p].append(await user.send(line))  # send all lines of the table
+            for line in table:
+                games[p].append(await user.send(line))  # send all lines of the table
 
-        # write player hand
-        games[p].insert(1, await user.send(drawHand(game, p)))
+                # write player hand
+            games[p].insert(1, await user.send(drawHand(game, p)))
+
+        except (KeyError, IndexError):
+            pass
+
+        canQuit[p] = True
 
 
 async def apply(ctx, index, color):
@@ -85,31 +92,41 @@ async def on_message_edit(before, after):
     await bot.process_commands(after)
 
 
+# skip any errors from a single user. If the error is when the table has to be redraw catch it and ignore only that user
+@bot.event
+async def on_command_error(ctx, e):
+    pass
+
+
 async def redraw(game):
     # get old table messages
 
     for p in game.players:
+        canQuit[p] = False
         if p in game.BOTS:
             continue
 
         oldTableMsgs = games[p][2:]
         newTable = drawTable(game, players, default=False)
 
-        await games[p][1].edit(content=drawHand(game, p))
+        try:
+            # update the hand
+            await games[p][1].edit(content=drawHand(game, p))
 
-        # update them with the new table
-        for line in range(1, len(newTable)):
-            if line == 4:
-                continue
+            # update the table
+            for line in range(1, len(newTable)):
+                if line == 4:
+                    continue
 
-            await oldTableMsgs[line].edit(content=newTable[line])
+                await oldTableMsgs[line].edit(content=newTable[line])
 
-        if game.end:
-            try:
+            if game.end:
                 del games[p]
                 del players[p]
-            except KeyError:
-                pass
+        except (KeyError, IndexError):
+            pass
+
+        canQuit[p] = True
 
 
 async def sendAndDel(ctx, s):
@@ -117,6 +134,30 @@ async def sendAndDel(ctx, s):
     msg = await ctx.author.send(s)
     await asyncio.sleep(5)
     await msg.delete()
+
+
+async def playCard(ctx):
+    id = ctx.author.id
+    game = games[id][0]
+    hand = game.getHand()
+    color = random.choice(Game.COLORS)
+
+    if skippable.get(id) is not None:
+        del skippable[id]
+
+    for i in range(len(hand)):
+        if game.canBeSet(hand[i]):
+
+            if hand[i].color == "Jolly":
+                for c in hand:
+                    if c.color != "Jolly":
+                        color = c.color
+                        break
+
+            await apply(ctx, i, color)  # pick a random color in case the card is a jolly
+            return True
+
+    return False
 
 
 @bot.command(name="play", aliases=["set", "use"])
@@ -128,40 +169,27 @@ async def useCard(ctx, index="auto", color=""):
     if index.isdecimal():
         await apply(ctx, int(index) - 1, color)  # apply the played card
     elif index == "auto":  # if no index has passed play automatically a valid move (card or draw)
-        game = games[id][0]
-        hand = game.getHand()
 
-        for i in range(len(hand)):
-            if game.canBeSet(hand[i]):
-                if hand[i].color == "Jolly":
-                    for c in hand:
-                        if c.color != "Jolly":
-                            color = c.color
-                            break
-                else:
-                    random.choice(Game.COLORS)
-                    
-                await apply(ctx, i, color)  # pick a random color in case the card is a jolly
-                return
-
-        await drawCard(ctx)
+        if not await playCard(ctx):  # try to play a card
+            await drawCard(ctx)  # if no card can be played, draw a card
+            if not await playCard(ctx):  # try to play again, if no card is still playable => skip turn
+                await skipTurn(ctx)
     else:
         await sendAndDel(ctx, "Invalid card index!")  # notify the use if it's not a valid index
-
-
-@bot.on_error
-async def on_error(ctx, e):
-    await sendAndDel(ctx, f"An error occurred {str(e)}. Please try again in 10s")
 
 
 @bot.command(name="quit")
 async def exitGame(ctx):
     id = ctx.author.id
-    left = ctx.author.name
     if games.get(id) is None:  # check if player is in game
         await sendAndDel(ctx, "You are not in game!")
         return
 
+    if not canQuit.get(id) or canQuit.get(id) is None:
+        await sendAndDel(ctx, "You can't use the command when table is updating or when bots are playing! Try again.")
+        return
+
+    left = ctx.author.name
     game = games[id][0]
 
     game.effect_msg = players[id]["name"] + " left the game"  # communicate that the player left the game
@@ -171,6 +199,7 @@ async def exitGame(ctx):
         game.effect_msg = "All players left the game."
         game.end = True
         await redraw(game)
+        await ctx.author.send("You left the game")  # notify the player everything went well
         return
 
     isCurrentPlayer = game.playerId() == id
@@ -208,15 +237,16 @@ async def exitGame(ctx):
 @bot.command(name="uno")
 async def helpUNO(ctx):
     # help command
-    await ctx.author.send("**List commands**\n+host <code> <bots number>\n"
-                          "**Create a room of 4 players with the given code with the specified number of bots."
-                          " If it doesn't already exists**\n+join <code>\n"
-                          "**Join the room represented by the given code**\n+leave\n**Leave the current room joined**\n"
-                          "+quit\n**Exit the current game (you will be replaced by a bot)**\n"
-                          "+play <index>\n**Play the card from your hand at the given index (index starts from 1)\n"
-                          "If no valid index has been detected. "
-                          "The first valid card will be played (if possible) else a card will be drown\n**"
-                          "+draw\n**Draw a card from the deck and skip the turn**")
+    await ctx.author.send("""**List commands**\n+host <code> <bots number>\n
+                          **Create a room of 4 players with the given code with the specified number of bots.
+                          If it doesn't already exists**\n+join <code>\n
+                          **Join the room represented by the given code**\n+leave\n**Leave the current room joined**\n
+                          +quit\n**Exit the current game (you will be replaced by a bot)**\n
+                          +play <index>\n**Play the card from your hand at the given index (index starts from 1)\n
+                          If no index is given a random valid card will be played (if possible) else a card will be drown
+                          and again a random card will be played (if possible) else the turn will be skipped\n
+                          +draw\n**Draw a card from the deck and skip the turn**\n
+                          +skip\n**Skip the turn (can be used only after a draw)**""")
 
 
 @bot.command(name="leave")
@@ -263,15 +293,37 @@ async def host(ctx, code, bots="0"):
         await sendAndDel(ctx, "This code already exists!")
 
 
+skippable = {}
+
+
+@bot.command(name="skip")
+async def skipTurn(ctx):
+    if skippable.get(ctx.author.id) is None:  # check if the player can skip (if has already drown a card)
+        await sendAndDel(ctx, "You must draw a card before you can skip the turn.")
+
+    del skippable[ctx.author.id]  # remove the possibility to skip
+
+    games[ctx.author.id][0].next()  # skip the turn
+    games[ctx.author.id][0].effect_msg = "Has drown and skipped the turn"
+    await games[ctx.author.id][0].botCheck()  # check if next is a bot
+
+
 @bot.command(name="draw")
 async def drawCard(ctx):
-    if games.get(ctx.author.id) is None:  # check if player is in game
+    id = ctx.author.id
+
+    if skippable.get(id) is not None:
+        await sendAndDel(ctx, "You have already drown this turn!")
+
+    if games.get(id) is None:  # check if player is in game
         await sendAndDel(ctx, "You are not in game!")
         return
 
-    game = games[ctx.author.id][0]
-    if game.playerId() == ctx.author.id:  # check if it's his turn
-        await game.draw(1, check=True)
+    game = games[id][0]
+    if game.playerId() == id:  # check if it's his turn
+        await game.draw(1, skip=False)  # draw a card and redraw hand
+        await games[id][1].edit(content=drawHand(game, id))
+        skippable[ctx.author.id] = True
     else:
         await sendAndDel(ctx, "It's not your turn!")
         return
@@ -295,7 +347,10 @@ async def enqueue(ctx, code):
 
     if len(queue[code]) == 4:  # if the queue is full then start the game
         for p in queue[code]:
-            await write(p, "Starting...")
+            await write(p, "Starting...\n**WARNING**\n"
+                           "Each player has 20s to complete his own turn.\n"
+                           "Max game time is 30m. If time is exceeded, game will close automatically.\n"
+                           "If no cards are played during this time you will be punished skipping your turn.")
 
         await play(queue[code])  # start the game
 
