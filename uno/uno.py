@@ -349,12 +349,13 @@ async def enqueue(ctx, code):
         for p in queue[code]:
             await write(p, "Starting...\n**WARNING**\n"
                            "Each player has 20s to complete his own turn.\n"
-                           "Max game time is 30m. If time is exceeded, game will close automatically.\n"
-                           "If no cards are played during this time you will be punished skipping your turn.")
+                           "If no cards are played during this time you will be punished skipping your turn."
+                           "Max game time is 30m. If time is exceeded, game will close automatically.\n")
 
-        await play(queue[code])  # start the game
-
+        tmp = queue[code]
         del queue[code]
+
+        await play(tmp)  # start the game
 
 
 @bot.event

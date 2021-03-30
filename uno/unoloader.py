@@ -110,7 +110,7 @@ class Game:
     async def start(self):
         self.effect_msg = await self.apply(self.card)
         await self.timer.runTurnTimer()
-        await self
+        await self.timer.runGameTimer()
 
     def playerId(self, i=-1) -> int:
         # return the player associated to that index. if not index is passed return the current player
@@ -174,6 +174,7 @@ class Game:
             self.clockwise = not self.clockwise
             if len(self.winners) != 2:
                 self.next()
+                self.prevPlayerIndex = self.currentPlayerIndex
         elif effect == "+4":
             tmp = self.currentPlayerIndex
             self.next()
@@ -234,7 +235,11 @@ class Game:
 
         self.hands[self.players[self.currentPlayerIndex]].sort(key=sortCards)
 
-        self.effect_msg = "Nothing and has drown 1 card"
+        if count == 1:
+            self.effect_msg = "Nothing and has drown 1 card"
+        else:
+            self.effect_msg = f"has drown {count} cards"
+
         if skip:
             self.next()
             # after a draw if skip is True go to the next player else wait if player wants to play the card
