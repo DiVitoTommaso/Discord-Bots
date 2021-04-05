@@ -81,7 +81,7 @@ async def apply(ctx, index, color):
             await sendAndDel(ctx, "That card can't be played!")
             return
         else:
-            await game.set(card)  # set the card. if it's not a jolly and if the card is illegal notify the player
+            res = await game.set(card)  # set the card. if it's not a jolly and if the card is illegal notify the player
 
     else:
         await sendAndDel(ctx, "It's not your turn")
@@ -140,21 +140,21 @@ async def playCard(ctx):
     id = ctx.author.id
     game = games[id][0]
     hand = game.getHand()
-    color = random.choice(Game.COLORS)
+    color = random.choice(Game.COLORS)  # choose random color
 
     if skippable.get(id) is not None:
         del skippable[id]
 
-    for i in range(len(hand)):
+    for i in range(len(hand)):  # find the first playable card
         if game.canBeSet(hand[i]):
 
-            if hand[i].color == "Jolly":
+            if hand[i].color == "Jolly":  # if it's a jolly choose a color in base of the first card != jolly
                 for c in hand:
                     if c.color != "Jolly":
                         color = c.color
                         break
 
-            await apply(ctx, i, color)  # pick a random color in case the card is a jolly
+            res = await apply(ctx, i, color)  # play the card
             return True
 
     return False
@@ -167,13 +167,11 @@ async def useCard(ctx, index="auto", color=""):
         await sendAndDel(ctx, "You are not in game!")
 
     if index.isdecimal():
-        await apply(ctx, int(index) - 1, color)  # apply the played card
+        res = await apply(ctx, int(index) - 1, color)  # apply the played card
     elif index == "auto":  # if no index has passed play automatically a valid move (card or draw)
 
         if not await playCard(ctx):  # try to play a card
-            await drawCard(ctx)  # if no card can be played, draw a card
-            if not await playCard(ctx):  # try to play again, if no card is still playable => skip turn
-                await skipTurn(ctx)
+            await sendAndDel(ctx, "No cards can be played. Draw a card or skip the turn.")
     else:
         await sendAndDel(ctx, "Invalid card index!")  # notify the use if it's not a valid index
 
@@ -237,16 +235,25 @@ async def exitGame(ctx):
 @bot.command(name="uno")
 async def helpUNO(ctx):
     # help command
-    await ctx.author.send("""**List commands**\n+host <code> <bots number>\n
-                          **Create a room of 4 players with the given code with the specified number of bots.
-                          If it doesn't already exists**\n+join <code>\n
-                          **Join the room represented by the given code**\n+leave\n**Leave the current room joined**\n
-                          +quit\n**Exit the current game (you will be replaced by a bot)**\n
-                          +play <index>\n**Play the card from your hand at the given index (index starts from 1)\n
-                          If no index is given a random valid card will be played (if possible) else a card will be drown
-                          and again a random card will be played (if possible) else the turn will be skipped\n
-                          +draw\n**Draw a card from the deck and skip the turn**\n
-                          +skip\n**Skip the turn (can be used only after a draw)**""")
+    await ctx.author.send("""
+**List commands**
++host <code> <bots number>
+    **Create a room of 4 players with the given code with the specified number of bots. If it doesn't already exists**
++join <code>
+    **Join the room represented by the given code**
++leave
+    **Leave the current room joined**
++quit
+    **Exit the current game (you will be replaced by a bot)**
++play <index> or "auto"
+    **Play the card from your hand at the given index (index starts from 1) If no index is given,
+    a random valid card will be played (if possible) else a card will be drown
+    and again a random card will be played (if possible) else the turn will be skipped**
++draw
+    **Draw a card from the deck and skip the turn**
++skip
+    **Skip the turn (can be used only after a draw)**
+    """)
 
 
 @bot.command(name="leave")
@@ -349,8 +356,8 @@ async def enqueue(ctx, code):
         for p in queue[code]:
             await write(p, "Starting...\n**WARNING**\n"
                            "Each player has 20s to complete his own turn.\n"
-                           "If no cards are played during this time you will be punished skipping your turn."
-                           "Max game time is 30m. If time is exceeded, game will close automatically.\n")
+                           "If no cards are played during this time you will be punished skipping your turn.\n"
+                           "Max game time is 30m. If time is exceeded, game will close automatically.")
 
         tmp = queue[code]
         del queue[code]
