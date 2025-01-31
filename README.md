@@ -1,4 +1,8 @@
-# discord-uno
+# Discord Bots
+
+### Discord Maze
+
+### Discord Uno
 An implementation of the UNO game in discord using a bot written in pure python. 
 If you want to play you need:
 1) to create a bot in the developer portal and set the auth token in the file **uno.py**
